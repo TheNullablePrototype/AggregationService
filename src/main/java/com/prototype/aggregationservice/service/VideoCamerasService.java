@@ -1,6 +1,11 @@
 package com.prototype.aggregationservice.service;
 
-public interface AggregationService {
+import com.prototype.aggregationservice.data.VideoCamera;
 
+import java.util.List;
+
+public interface VideoCamerasService {
+
+    List<VideoCamera> getVideoCameras(String url);
 
 }

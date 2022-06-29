@@ -1,52 +1,76 @@
 package com.prototype.aggregationservice.service.impl;
 
+import com.prototype.aggregationservice.data.SourceData;
+import com.prototype.aggregationservice.data.TokenData;
 import com.prototype.aggregationservice.data.VideoCamera;
 import com.prototype.aggregationservice.data.VideoCameraData;
+import com.prototype.aggregationservice.helper.FutureHelper;
 import com.prototype.aggregationservice.helper.GsonHelper;
-import com.prototype.aggregationservice.service.AggregationService;
-import com.prototype.aggregationservice.utils.web.WebRequest;
-import com.prototype.aggregationservice.utils.web.WebUtils;
-import org.apache.http.HttpResponse;
+import com.prototype.aggregationservice.helper.WebHelper;
+import com.prototype.aggregationservice.service.HttpService;
+import com.prototype.aggregationservice.service.VideoCamerasService;
+import org.apache.hc.client5.http.async.methods.SimpleHttpResponse;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 @Service
-public class AggregationServiceImpl implements AggregationService {
+public class VideoCamerasServiceImpl implements VideoCamerasService {
 
-    @Value(value = "${url}")
-    private String url;
-
+    private final HttpService httpService;
     private final GsonHelper gsonHelper;
 
     @Autowired
-    public AggregationServiceImpl(GsonHelper gsonHelper) {
+    public VideoCamerasServiceImpl(HttpService httpService, GsonHelper gsonHelper) {
+        this.httpService = httpService;
         this.gsonHelper = gsonHelper;
     }
 
-    public List<VideoCamera> getVideoCameras() {
-        //List<VideoCameraData> videoCameraData = loadVideoCamerasData(this.url);
-        return List.of();
-    }
+    @Override
+    public List<VideoCamera> getVideoCameras(String url) {
+        try {
 
-    public List<VideoCameraData> loadVideoCamerasData(String url) throws IOException {
-        HttpResponse response = WebRequest.create()
-                .method(WebRequest.Method.GET)
-                .url(url)
-                .execute();
+            SimpleHttpResponse response = httpService.createFutureResponse(WebHelper.createRequest(url)).get();
 
-        if (response.getStatusLine().getStatusCode() != 200) {
-            throw new IOException("HTTP response code: " + response.getStatusLine().getStatusCode());
+            List<VideoCameraData> dataList = this.gsonHelper.getGson()
+                    .fromJson(response.getBody().getBodyText(), GsonHelper.TYPE_LIST_VIDEO_CAMERA_DATA);
+
+            return dataList.parallelStream().unordered()
+                    .map(data -> {
+                        try {
+
+                            final Future<SimpleHttpResponse> sourceFuture =
+                                    httpService.createFutureResponse(WebHelper.createRequest(data.sourceDataUrl()));
+                            final Future<SimpleHttpResponse> tokenFuture =
+                                    httpService.createFutureResponse(WebHelper.createRequest(data.tokenDataUrl()));
+
+                            CompletableFuture.allOf(
+                                    FutureHelper.fromFuture(sourceFuture),
+                                    FutureHelper.fromFuture(tokenFuture)
+                            ).get();
+
+                            final SourceData sourceData = this.gsonHelper.getGson()
+                                    .fromJson(sourceFuture.get().getBodyText(), SourceData.class);
+
+                            final TokenData tokenData = this.gsonHelper.getGson()
+                                    .fromJson(tokenFuture.get().getBodyText(), TokenData.class);
+
+                            return new VideoCamera(data.id(), sourceData, tokenData);
+
+                        } catch (InterruptedException | ExecutionException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .toList();
+
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
         }
 
-        String json = WebUtils.toString(response.getEntity().getContent());
-        if (json == null || json.isBlank()) {
-            json = "{}";
-        }
-        return this.gsonHelper.getGson().fromJson(json, GsonHelper.TYPE_LIST_VIDEO_CAMERA_DATA);
     }
 
 }

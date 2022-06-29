@@ -1,4 +1,4 @@
-package com.prototype.aggregationservice.contoller;
+package com.prototype.aggregationservice.controller;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
